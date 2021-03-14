@@ -1,0 +1,20 @@
+{
+    "name": "chisono-telegrambot",
+    "version": "1.0.0",
+    "description": "La versione per telegram del famoso gioco Chi Sono",
+    "main": "app.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/migelmalajISII/ChiSono-TelegramBot"
+    },
+    "author": "Migel Malaj",
+    "license": "MIT",
+    "dependencies": {
+        "axios": "^0.21.1",
+        "mysql": "^2.18.1",
+        "node-telegram-bot-api": "^0.51.0"
+    }
+}
