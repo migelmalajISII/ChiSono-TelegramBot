@@ -1,6 +1,12 @@
 const TelegramBot = require('node-telegram-bot-api');
 const configurazione = require('./config/config.json');
 const mysql = require('mysql');
+const express = require('express');
+const app = express()
+const ejs = require('ejs');
+const session = require('express-session')
+const bcrypt = require('bcrypt');
+const generator = require('generate-password');
 
 const token = configurazione.TokenTelegram;
 const bot = new TelegramBot(token, {
@@ -411,3 +417,89 @@ bot.onText(/\/result (.+)/, (msg, match) => {
         bot.sendMessage(msg.chat.id, "Comando disponibile solo per i gruppi");
     }
 });
+
+/*
+ *  WebSite express
+ */
+
+app.use(express.urlencoded({
+    extended: true,
+})).use(session({
+    secret: '0luuFR501RY4PPr',
+    name: 'uniqueSessionID',
+    resave: false,
+    saveUninitialized: false,
+}));
+
+
+app.use('/static', express.static('static'));
+app.set("view engine", "ejs");
+
+app.get('/', (req, res) => {
+    if (req.session.loggedIn) {
+        res.render("dashboard", {
+            title: "Dashboard"
+        });
+    } else {
+        res.render("index", {
+            title: "Login",
+            message: false,
+            type: false
+        });
+    }
+})
+
+app.post('/', (req, res, next) => {
+    var conn = ConnectDB()
+    conn.query("SELECT `Password`, `Ruolo` FROM `utenti` WHERE `Username`=?", req.body.username, function(error, result) {
+        if (error) {
+            res.render("index", {
+                title: "Login",
+                message: "Dati errati.",
+                type: "alert-warning"
+            });
+        } else {
+            let compare = bcrypt.compareSync(req.body.password, result[0].Password)
+            if (compare) {
+                res.locals.username = req.body.username
+                res.locals.type = result[0].Ruolo
+                next()
+            } else
+                res.render("index", {
+                    title: "Login",
+                    message: "Dati errati.",
+                    type: "alert-danger"
+                });
+        }
+    });
+    DisconnectDB(conn)
+}, (req, res) => {
+    req.session.loggedIn = true
+    req.session.username = res.locals.username
+    req.session.type = res.locals.type
+    res.redirect("/")
+})
+
+app.get('/logout', (req, res) => {
+    req.session.destroy((err) => {})
+    res.redirect("/")
+})
+
+/*app.get('/aziz', (req, res) => {
+    const salt = bcrypt.genSaltSync(10);
+    var password = generator.generate({
+        length: 10,
+        numbers: true
+    })
+    let hash = bcrypt.hashSync(password, salt);
+
+    var conn = ConnectDB()
+    conn.query("UPDATE `utenti` SET `Password`=? WHERE `IDUtente`=? AND `Username`=?", [hash, 530353005, "Naigel_MM"], function(error, result) {
+        if (error) {
+            console.log(error);
+        }
+    });
+    DisconnectDB(conn)
+})*/
+
+app.listen(configurazione.port, configurazione.hostname, () => console.log("Connesso a " + configurazione.hostname + ":" + configurazione.port));
