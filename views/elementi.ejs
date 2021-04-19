@@ -4,6 +4,7 @@
             <h2 class="text-center mb-5">
                 <%= title %>
             </h2>
+
             <table class="table table-striped table-responsive-md text-center">
                 <thead class="thead-light">
                     <tr>
@@ -18,22 +19,18 @@
                     <% body.forEach(element => { %>
                         <tr>
                             <th scope="row" class="align-middle">
-                                <%=element.FKPartita%>
+                                <%=element.IDElemento%>
                             </th>
                             <td class="align-middle"><img src="<%=element.Link%>" class="img-fluid img-thumbnail" alt="" height="150px" width="150px"></td>
                             <td class="align-middle">
                                 <%=element.Valore%>
                             </td>
                             <td class="align-middle">
-                                <%=element.Alias%>
-                            </td>
-                            <td class="align-middle">
-                                <%=element.Classificato%>
+                                <%= element.Utilizzato || 0 %>
                             </td>
                         </tr>
                         <% }) %>
                 </tbody>
             </table>
-
         </div>
         <%- include('partials/footer') %>

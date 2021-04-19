@@ -8,10 +8,13 @@ const session = require('express-session')
 const bcrypt = require('bcrypt');
 const generator = require('generate-password');
 
+
+const salt = bcrypt.genSaltSync(configurazione.salt);
 const token = configurazione.TokenTelegram;
 const bot = new TelegramBot(token, {
     polling: true
 });
+
 
 var categorie = []
 FillCategorie()
@@ -263,7 +266,7 @@ async function GestisciPartiteInCorso(IDMessaggio, IDPartita, player) {
 bot.onText(/\/start/, (msg) => {
     if (msg.chat.type == 'group') {
         var conn = ConnectDB()
-        conn.query("INSERT INTO utenti(Ruolo,IDUtente) VALUES (1,?)", Math.abs(msg.chat.id), (err, result) => {
+        conn.query("INSERT INTO utenti(Ruolo,IDUtente) VALUES (?,1,?)", [msg.chat.title, Math.abs(msg.chat.id)], (err, result) => {
             if (err) {
                 if (err.code != 'ER_DUP_ENTRY') {
                     bot.sendMessage(msg.chat.id, "Errore: Bot Inattivo.\nRiprovare più tardi");
@@ -418,6 +421,46 @@ bot.onText(/\/result (.+)/, (msg, match) => {
     }
 });
 
+
+bot.onText(/\/generapassword/, (msg) => {
+    let from = ""
+    if (msg.chat.type == 'private') {
+        from = msg.chat.username;
+    } else {
+        from = msg.chat.title;
+    }
+
+    var password = generator.generate({ length: 10, numbers: true })
+    let hash = bcrypt.hashSync(password, salt);
+    var conn = ConnectDB()
+    conn.query("UPDATE `utenti` SET `Password`=?,`Username`=? WHERE `IDUtente`=?", [hash, from, Math.abs(msg.chat.id)], function(error, result) {
+        if (error) {
+            console.log(error);
+            bot.sendMessage(msg.chat.id, "Riprova più tardi");
+        }
+        bot.sendMessage(msg.chat.id, "Password generata con successo.\nUsername: " + from + "\nPassword: " + password);
+    });
+    DisconnectDB(conn)
+
+});
+
+bot.onText(/\/setpassword (.+)/, (msg, match) => {
+    if (msg.chat.type == 'group') {
+        bot.sendMessage(msg.chat.id, "Comando non disponibile per i gruppi");
+    } else {
+        let hash = bcrypt.hashSync(match[1], salt);
+        var conn = ConnectDB()
+        conn.query("UPDATE `utenti` SET `Password`=?,`Username`=? WHERE `IDUtente`=?", [hash, msg.chat.username, Math.abs(msg.chat.id)], function(error, result) {
+            if (error) {
+                console.log(error);
+                bot.sendMessage(msg.chat.id, "Riprova più tardi");
+            }
+            bot.sendMessage(msg.chat.id, "Password configurata.");
+        });
+        DisconnectDB(conn)
+    }
+});
+
 /*
  *  WebSite express
  */
@@ -437,11 +480,24 @@ app.set("view engine", "ejs");
 
 app.get('/', (req, res) => {
     if (req.session.loggedIn) {
-        res.render("dashboard", {
-            title: "Dashboard"
+        var conn = ConnectDB()
+        conn.query("SELECT LP.`FKPartita`, LP.`Classificato`, E.`Valore`, E.`Link`, C.Alias FROM `logpartite` AS LP INNER JOIN `elementi` AS E ON LP.FKElemento=E.IDElemento INNER JOIN `categorie` AS C ON E.FKCategoria=C.IDCategoria WHERE `FKUtente`=?", [req.session.IDUser], (err, result) => {
+            if (err) {
+                res.render("login", {
+                    title: "Login",
+                    message: false,
+                    type: false
+                });
+            }
+            res.render("dashboard", {
+                title: "Dashboard delle partite di " + req.session.username,
+                head: ["ID Partita", "Immagine", "Elemento", " Categoria", "Classificato"],
+                body: result
+            });
         });
+        DisconnectDB(conn)
     } else {
-        res.render("index", {
+        res.render("login", {
             title: "Login",
             message: false,
             type: false
@@ -449,11 +505,49 @@ app.get('/', (req, res) => {
     }
 })
 
+app.get('/categorie', (req, res) => {
+    if (req.session.loggedIn) {
+        var conn = ConnectDB()
+        conn.query("SELECT `IDCategoria`, `Alias`,(SELECT COUNT(`FKCategoria`) FROM `partite` WHERE `FKCategoria`=`IDCategoria` GROUP BY `FKCategoria`) AS Utilizzato FROM `categorie` ORDER BY `IDCategoria`", (err, result) => {
+            if (err) {
+                res.redirect("/")
+            }
+            res.render("categorie", {
+                title: "Categorie disponibili",
+                head: ["ID Categoria", "Categoria", "Utilizzato"],
+                body: result
+            });
+        });
+        DisconnectDB(conn)
+    } else {
+        res.redirect("/")
+    }
+})
+
+app.get('/elementi/:tagId', (req, res) => {
+    if (req.session.loggedIn) {
+        var conn = ConnectDB()
+        conn.query("SELECT `IDElemento`, `Valore`, `Link`,(SELECT COUNT(`FKElemento`) FROM `logpartite` WHERE `FKElemento`=`IDElemento` GROUP BY `FKElemento`) AS Utilizzato FROM `elementi` WHERE `FKCategoria`=?", [req.params.tagId], (err, result) => {
+            if (err) {
+                res.redirect("/")
+            }
+            res.render("elementi", {
+                title: "Tutti gli elementi",
+                head: ["ID Elemento", "Immagine", "Descrizione", "Utilizzato"],
+                body: result
+            });
+            DisconnectDB(conn)
+        });
+    } else {
+        res.redirect("/")
+    }
+})
+
 app.post('/', (req, res, next) => {
     var conn = ConnectDB()
-    conn.query("SELECT `Password`, `Ruolo` FROM `utenti` WHERE `Username`=?", req.body.username, function(error, result) {
+    conn.query("SELECT `IDUtente`,`Password`, `Ruolo` FROM `utenti` WHERE `Username`=?", req.body.username, function(error, result) {
         if (error) {
-            res.render("index", {
+            res.render("login", {
                 title: "Login",
                 message: "Dati errati.",
                 type: "alert-warning"
@@ -461,11 +555,12 @@ app.post('/', (req, res, next) => {
         } else {
             let compare = bcrypt.compareSync(req.body.password, result[0].Password)
             if (compare) {
+                res.locals.IDUser = result[0].IDUtente
                 res.locals.username = req.body.username
                 res.locals.type = result[0].Ruolo
                 next()
             } else
-                res.render("index", {
+                res.render("login", {
                     title: "Login",
                     message: "Dati errati.",
                     type: "alert-danger"
@@ -475,6 +570,7 @@ app.post('/', (req, res, next) => {
     DisconnectDB(conn)
 }, (req, res) => {
     req.session.loggedIn = true
+    req.session.IDUser = res.locals.IDUser
     req.session.username = res.locals.username
     req.session.type = res.locals.type
     res.redirect("/")
@@ -484,22 +580,5 @@ app.get('/logout', (req, res) => {
     req.session.destroy((err) => {})
     res.redirect("/")
 })
-
-/*app.get('/aziz', (req, res) => {
-    const salt = bcrypt.genSaltSync(10);
-    var password = generator.generate({
-        length: 10,
-        numbers: true
-    })
-    let hash = bcrypt.hashSync(password, salt);
-
-    var conn = ConnectDB()
-    conn.query("UPDATE `utenti` SET `Password`=? WHERE `IDUtente`=? AND `Username`=?", [hash, 530353005, "Naigel_MM"], function(error, result) {
-        if (error) {
-            console.log(error);
-        }
-    });
-    DisconnectDB(conn)
-})*/
 
 app.listen(configurazione.port, configurazione.hostname, () => console.log("Connesso a " + configurazione.hostname + ":" + configurazione.port));
