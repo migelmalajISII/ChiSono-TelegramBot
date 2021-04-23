@@ -18,24 +18,21 @@
                     <% body.forEach(element => { %>
                         <tr>
                             <th scope="row" class="align-middle">
-                                <%=element.FKPartita%>
+                                <a href="/partita/<%=element.IDPartita%>">
+                                    <%=element.IDPartita%>
+                                </a>
                             </th>
-                            <td class="align-middle"><img src="<%=element.Link%>" class="img-fluid img-thumbnail" alt="" height="150px" width="150px"></td>
                             <td class="align-middle">
-                                <%=element.Valore%>
-                            </td>
-                            <td class="align-middle">
-                                <a href="/elementi/<%=element.IDCategoria%>">
+                                <a href="/elementi/<%=element.FKCategoria%>">
                                     <%=element.Alias%>
                                 </a>
                             </td>
                             <td class="align-middle">
-                                <%=element.Classificato%>
+                                <%=element.Giocatori%>
                             </td>
                         </tr>
                         <% }) %>
                 </tbody>
             </table>
-
         </div>
         <%- include('partials/footer') %>

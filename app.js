@@ -9,7 +9,6 @@ const bcrypt = require('bcrypt');
 const generator = require('generate-password');
 
 
-const salt = bcrypt.genSaltSync(configurazione.salt);
 const token = configurazione.TokenTelegram;
 const bot = new TelegramBot(token, {
     polling: true
@@ -430,7 +429,12 @@ bot.onText(/\/generapassword/, (msg) => {
         from = msg.chat.title;
     }
 
-    var password = generator.generate({ length: 10, numbers: true })
+    var password = generator.generate({
+        length: 10,
+        numbers: true
+    })
+
+    let salt = bcrypt.genSaltSync(configurazione.salt);
     let hash = bcrypt.hashSync(password, salt);
     var conn = ConnectDB()
     conn.query("UPDATE `utenti` SET `Password`=?,`Username`=? WHERE `IDUtente`=?", [hash, from, Math.abs(msg.chat.id)], function(error, result) {
@@ -438,7 +442,8 @@ bot.onText(/\/generapassword/, (msg) => {
             console.log(error);
             bot.sendMessage(msg.chat.id, "Riprova più tardi");
         }
-        bot.sendMessage(msg.chat.id, "Password generata con successo.\nUsername: " + from + "\nPassword: " + password);
+        bot.sendMessage(msg.chat.id, "Inviata");
+        bot.sendMessage(msg.from.id, "Password generata con successo.\nUsername: " + from + "\nPassword: " + password);
     });
     DisconnectDB(conn)
 
@@ -448,6 +453,7 @@ bot.onText(/\/setpassword (.+)/, (msg, match) => {
     if (msg.chat.type == 'group') {
         bot.sendMessage(msg.chat.id, "Comando non disponibile per i gruppi");
     } else {
+        let salt = bcrypt.genSaltSync(configurazione.salt);
         let hash = bcrypt.hashSync(match[1], salt);
         var conn = ConnectDB()
         conn.query("UPDATE `utenti` SET `Password`=?,`Username`=? WHERE `IDUtente`=?", [hash, msg.chat.username, Math.abs(msg.chat.id)], function(error, result) {
@@ -480,22 +486,44 @@ app.set("view engine", "ejs");
 
 app.get('/', (req, res) => {
     if (req.session.loggedIn) {
-        var conn = ConnectDB()
-        conn.query("SELECT LP.`FKPartita`, LP.`Classificato`, E.`Valore`, E.`Link`, C.Alias FROM `logpartite` AS LP INNER JOIN `elementi` AS E ON LP.FKElemento=E.IDElemento INNER JOIN `categorie` AS C ON E.FKCategoria=C.IDCategoria WHERE `FKUtente`=?", [req.session.IDUser], (err, result) => {
-            if (err) {
-                res.render("login", {
-                    title: "Login",
-                    message: false,
-                    type: false
+        console.log(req.session.type.data)
+        if (req.session.type.data == 0) {
+            var conn = ConnectDB()
+            conn.query("SELECT LP.`FKPartita`, LP.`Classificato`, E.`Valore`, E.`Link`, C.Alias, C.IDCategoria FROM `logpartite` AS LP INNER JOIN `elementi` AS E ON LP.FKElemento=E.IDElemento INNER JOIN `categorie` AS C ON E.FKCategoria=C.IDCategoria WHERE `FKUtente`=?", [req.session.IDUser], (err, result) => {
+                if (err) {
+                    res.render("login", {
+                        title: "Login",
+                        message: false,
+                        type: false
+                    });
+                }
+                res.render("dashboard", {
+                    title: "Dashboard delle partite di " + req.session.username,
+                    head: ["ID Partita", "Immagine", "Elemento", " Categoria", "Classificato"],
+                    body: result,
+                    url: 'home'
                 });
-            }
-            res.render("dashboard", {
-                title: "Dashboard delle partite di " + req.session.username,
-                head: ["ID Partita", "Immagine", "Elemento", " Categoria", "Classificato"],
-                body: result
             });
-        });
-        DisconnectDB(conn)
+            DisconnectDB(conn)
+        } else {
+            var conn = ConnectDB()
+            conn.query("SELECT P.`IDPartita`, P.`FKCategoria`, C.Alias, (SELECT COUNT(*) FROM `logpartite` WHERE FKPartita=IDPartita) AS Giocatori FROM `partite` AS P INNER JOIN `categorie` AS C ON P.FKCategoria=C.IDCategoria WHERE `FKGruppo`=?", [req.session.IDUser], (err, result) => {
+                if (err) {
+                    res.render("login", {
+                        title: "Login",
+                        message: false,
+                        type: false
+                    });
+                }
+                res.render("partite", {
+                    title: "Dashboard delle partite di " + req.session.username,
+                    head: ["ID Partita", "Categoria", " Numero di giocatori"],
+                    body: result,
+                    url: 'home'
+                });
+            });
+            DisconnectDB(conn)
+        }
     } else {
         res.render("login", {
             title: "Login",
@@ -515,7 +543,32 @@ app.get('/categorie', (req, res) => {
             res.render("categorie", {
                 title: "Categorie disponibili",
                 head: ["ID Categoria", "Categoria", "Utilizzato"],
-                body: result
+                body: result,
+                url: 'categorie'
+            });
+        });
+        DisconnectDB(conn)
+    } else {
+        res.redirect("/")
+    }
+})
+
+app.get('/partita/:tagId', (req, res) => {
+    if (req.session.loggedIn) {
+        var conn = ConnectDB()
+        conn.query("SELECT U.Username AS FKPartita, LP.`Classificato`, E.`Valore`, E.`Link`, C.Alias, C.IDCategoria FROM `logpartite` AS LP INNER JOIN `elementi` AS E ON LP.FKElemento=E.IDElemento INNER JOIN `categorie` AS C ON E.FKCategoria=C.IDCategoria INNER JOIN utenti AS U ON LP.FKUtente=U.IDUtente WHERE `FKPartita`=?", [req.params.tagId], (err, result) => {
+            if (err) {
+                res.render("login", {
+                    title: "Login",
+                    message: false,
+                    type: false
+                });
+            }
+            res.render("dashboard", {
+                title: "Dashboard delle partite di " + req.session.username,
+                head: ["Nome Giocatore", "Immagine", "Elemento", " Categoria", "Classificato"],
+                body: result,
+                url: 'categorie'
             });
         });
         DisconnectDB(conn)
@@ -534,7 +587,8 @@ app.get('/elementi/:tagId', (req, res) => {
             res.render("elementi", {
                 title: "Tutti gli elementi",
                 head: ["ID Elemento", "Immagine", "Descrizione", "Utilizzato"],
-                body: result
+                body: result,
+                url: 'categorie'
             });
             DisconnectDB(conn)
         });
