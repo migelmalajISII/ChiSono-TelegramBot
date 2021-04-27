@@ -1,5 +1,4 @@
 const TelegramBot = require('node-telegram-bot-api');
-const configurazione = require('./config/config.json');
 const mysql = require('mysql');
 const express = require('express');
 const app = express()
@@ -7,10 +6,17 @@ const ejs = require('ejs');
 const session = require('express-session')
 const bcrypt = require('bcrypt');
 const generator = require('generate-password');
+const salt_num = 10;
 
 
-const token = configurazione.TokenTelegram;
-const bot = new TelegramBot(token, {
+const TOKEN = process.env.TOKEN || ""
+const DB_HOST = process.env.DB_HOST || ""
+const DB_USER = process.env.DB_USER || ""
+const DB_PASSWORD = process.env.DB_PASSWORD || ""
+const DB_DATABASE = process.env.DB_DATABASE || ""
+const PORT = process.env.PORT || 9090
+
+const bot = new TelegramBot(TOKEN, {
     polling: true
 });
 
@@ -24,11 +30,12 @@ var partiteInCorso = {}
 
 function ConnectDB() {
     const config = {
-        host: configurazione.DB_HOST,
-        database: configurazione.DB_DATABASE,
-        user: configurazione.DB_USER,
-        password: configurazione.DB_PASSWORD,
-        multipleStatements: true
+        host: DB_HOST,
+        database: DB_DATABASE,
+        user: DB_USER,
+        password: DB_PASSWORD,
+        multipleStatements: true,
+        dateStrings: true
     }
     var connection = mysql.createConnection(config);
     connection.connect(function(err) {
@@ -54,7 +61,7 @@ function DisconnectDB(con) {
 
 function FillCategorie() {
     var conn = ConnectDB()
-    conn.query("SELECT CONCAT(\"cat_\",IDCategoria) AS callback_data, Alias AS text FROM Categorie", (err, res) => {
+    conn.query("SELECT CONCAT(\"cat_\",IDCategoria) AS callback_data, Alias AS text FROM `categorie`", (err, res) => {
         if (err)
             throw err;
         categorie = res;
@@ -69,7 +76,7 @@ function RestartTimeOut(id) { // Stranamente Funziona Molto BUONO
     }
     var callback = setTimeout(() => {
         var conn = ConnectDB()
-        conn.query("UPDATE Partite SET Status=1 WHERE FKGruppo=? AND Status=0", id, (err, res) => {
+        conn.query("UPDATE `partite` SET Status=1 WHERE FKGruppo=? AND Status=0", id, (err, res) => {
             VerificaPartita(id).then((value) => {
                 if (!value[3])
                     bot.sendMessage("-" + id, "Partita avviata");
@@ -91,10 +98,10 @@ function VerificaPartita(id) {
         var conn = ConnectDB()
         conn.query("SELECT COUNT(LP.`FKUtente`) AS num, LP.`FKPartita`, P.`FKCategoria` FROM `logpartite` AS LP INNER JOIN `partite` AS P ON LP.`FKPartita`=P.`IDPartita` WHERE P.`Status`= 1 AND P.`FKGruppo`= ? GROUP BY LP.`FKPartita`", id, (err, res) => {
             try {
-                if (res[0].num < 2) // Cambiare a 2
-                    reject(); // 0 e 1 Giocatore
+                if (res[0].num < 3)
+                    reject();
                 else if (res[0].num < 20)
-                    resolve([res[0].num, res[0].FKPartita, res[0].FKCategoria, false]); // 2<x<20
+                    resolve([res[0].num, res[0].FKPartita, res[0].FKCategoria, false]); // 3<x<20
                 else
                     resolve([res[0].num, res[0].FKPartita, res[0].FKCategoria, true]); // >=21
                 DisconnectDB(conn)
@@ -243,7 +250,7 @@ async function GestisciPartiteInCorso(IDMessaggio, IDPartita, player) {
                         GestisciPartiteInCorso(IDMessaggio, undefined, undefined)
                     } else {
                         clearTimeout(partiteInCorso[IDMessaggio])
-                        conn.query("UPDATE `logpartite` SET `Classificato`=(SELECT MAX(tab.`Classificato`)+1 FROM (SELECT * FROM `logpartite`) AS tab WHERE tab.`FKPartita`=`FKPartita`) WHERE `FKUtente`= ? AND `FKPartita`= ?; UPDATE Partite SET Status=2 WHERE FKGruppo=? AND Status=1", [partiteInCorso[IDMessaggio].players[partiteInCorso[IDMessaggio].turno].FKUtente, partiteInCorso[IDMessaggio].idpartita, IDMessaggio], (err, res) => {
+                        conn.query("UPDATE `logpartite` SET `Classificato`=(SELECT MAX(tab.`Classificato`)+1 FROM (SELECT * FROM `logpartite`) AS tab WHERE tab.`FKPartita`=`FKPartita`) WHERE `FKUtente`= ? AND `FKPartita`= ?; UPDATE `partite` SET Status=2 WHERE FKGruppo=? AND Status=1", [partiteInCorso[IDMessaggio].players[partiteInCorso[IDMessaggio].turno].FKUtente, partiteInCorso[IDMessaggio].idpartita, IDMessaggio], (err, res) => {
                             if (err) {
                                 if (err.code != 'ER_DUP_ENTRY') {
                                     bot.sendMessage("-" + IDMessaggio, "Errore: Bot Inattivo.\nRiprovare più tardi");
@@ -265,7 +272,7 @@ async function GestisciPartiteInCorso(IDMessaggio, IDPartita, player) {
 bot.onText(/\/start/, (msg) => {
     if (msg.chat.type == 'group') {
         var conn = ConnectDB()
-        conn.query("INSERT INTO utenti(Ruolo,IDUtente) VALUES (?,1,?)", [msg.chat.title, Math.abs(msg.chat.id)], (err, result) => {
+        conn.query("INSERT INTO `utenti`(Ruolo,IDUtente) VALUES (?,1,?)", [msg.chat.title, Math.abs(msg.chat.id)], (err, result) => {
             if (err) {
                 if (err.code != 'ER_DUP_ENTRY') {
                     bot.sendMessage(msg.chat.id, "Errore: Bot Inattivo.\nRiprovare più tardi");
@@ -279,7 +286,7 @@ bot.onText(/\/start/, (msg) => {
         DisconnectDB(conn)
     } else {
         var conn = ConnectDB()
-        conn.query("INSERT INTO utenti(Username, Ruolo, IDUtente) VALUES (?,0,?)", [msg.chat.first_name, Math.abs(msg.chat.id)], (err, result) => {
+        conn.query("INSERT INTO `utenti`(Username, Ruolo, IDUtente) VALUES (?,0,?)", [msg.chat.first_name, Math.abs(msg.chat.id)], (err, result) => {
             if (err) {
                 if (err.code != 'ER_DUP_ENTRY') {
                     bot.sendMessage(msg.chat.id, "Errore: Bot Inattivo.\nRiprovare più tardi");
@@ -295,7 +302,7 @@ bot.onText(/\/start/, (msg) => {
 bot.onText(/\/newgame/, (msg) => {
     if (msg.chat.type == 'group') {
         var conn = ConnectDB()
-        conn.query("SELECT IDPartita FROM Partite WHERE FKGruppo=? AND (Status=0 OR Status=1)", Math.abs(msg.chat.id), (err, res) => {
+        conn.query("SELECT IDPartita FROM `partite` WHERE FKGruppo=? AND (Status=0 OR Status=1)", Math.abs(msg.chat.id), (err, res) => {
             if (res.length) {
                 bot.sendMessage(msg.chat.id, "Una partita è già in corso");
             } else {
@@ -315,14 +322,14 @@ bot.onText(/\/newgame/, (msg) => {
 bot.onText(/\/partecipo/, (msg) => {
     if (msg.chat.type == 'group') {
         var conn = ConnectDB()
-        conn.query("SELECT IDPartita FROM partite WHERE FKGruppo=? AND Status=0", Math.abs(msg.chat.id), (err, result, field) => {
+        conn.query("SELECT IDPartita FROM `partite` WHERE FKGruppo=? AND Status=0", Math.abs(msg.chat.id), (err, result, field) => {
             if (err) {
                 throw err
             }
             if (!result.length) {
                 bot.sendMessage(msg.chat.id, "Azione non valida");
             } else {
-                conn.query("INSERT INTO logpartite(FKUtente,FKPartita) VALUES (?,?)", [msg.from.id, result[0].IDPartita], (errs, results) => {
+                conn.query("INSERT INTO `logpartite`(FKUtente,FKPartita) VALUES (?,?)", [msg.from.id, result[0].IDPartita], (errs, results) => {
                     if (errs) {
                         if (errs.code == 'ER_DUP_ENTRY') {
                             bot.sendMessage(msg.chat.id, "[" + msg.from.first_name + "](tg://user?id=" + msg.from.id + ") partecipi già alla partita", {
@@ -363,7 +370,7 @@ bot.on("callback_query", function(callbackQuery) {
 
     let categoria = categorie.find(elem => elem.callback_data == element).text;
     var conn = ConnectDB()
-    conn.query("INSERT INTO Partite(FKCategoria,FKGruppo) VALUES (?,?)", [parseInt(number), Math.abs(parseInt(callbackQuery.message.chat.id))], (err, results) => {
+    conn.query("INSERT INTO `partite`(FKCategoria,FKGruppo) VALUES (?,?)", [parseInt(number), Math.abs(parseInt(callbackQuery.message.chat.id))], (err, results) => {
         if (err) {
             bot.editMessageText("Errore: Bot Inattivo.\nRiprovare più tardi", {
                 chat_id: callbackQuery.message.chat.id,
@@ -385,7 +392,7 @@ bot.on("callback_query", function(callbackQuery) {
 bot.onText(/\/termina/, (msg) => {
     if (msg.chat.type == 'group') {
         var conn = ConnectDB()
-        conn.query("UPDATE Partite SET Status=2 WHERE FKGruppo=? AND (Status=1 OR Status=0)", Math.abs(msg.chat.id), (err, res) => {
+        conn.query("UPDATE `partite` SET Status=2 WHERE FKGruppo=? AND (Status=1 OR Status=0)", Math.abs(msg.chat.id), (err, res) => {
             if (err) {
                 if (err.code != 'ER_DUP_ENTRY') {
                     bot.sendMessage(msg.chat.id, "Errore: Bot Inattivo.\nRiprovare più tardi");
@@ -434,7 +441,7 @@ bot.onText(/\/generapassword/, (msg) => {
         numbers: true
     })
 
-    let salt = bcrypt.genSaltSync(configurazione.salt);
+    let salt = bcrypt.genSaltSync(salt_num);
     let hash = bcrypt.hashSync(password, salt);
     var conn = ConnectDB()
     conn.query("UPDATE `utenti` SET `Password`=?,`Username`=? WHERE `IDUtente`=?", [hash, from, Math.abs(msg.chat.id)], function(error, result) {
@@ -453,7 +460,7 @@ bot.onText(/\/setpassword (.+)/, (msg, match) => {
     if (msg.chat.type == 'group') {
         bot.sendMessage(msg.chat.id, "Comando non disponibile per i gruppi");
     } else {
-        let salt = bcrypt.genSaltSync(configurazione.salt);
+        let salt = bcrypt.genSaltSync(salt_num);
         let hash = bcrypt.hashSync(match[1], salt);
         var conn = ConnectDB()
         conn.query("UPDATE `utenti` SET `Password`=?,`Username`=? WHERE `IDUtente`=?", [hash, msg.chat.username, Math.abs(msg.chat.id)], function(error, result) {
@@ -486,7 +493,6 @@ app.set("view engine", "ejs");
 
 app.get('/', (req, res) => {
     if (req.session.loggedIn) {
-        console.log(req.session.type.data)
         if (req.session.type.data == 0) {
             var conn = ConnectDB()
             conn.query("SELECT LP.`FKPartita`, LP.`Classificato`, E.`Valore`, E.`Link`, C.Alias, C.IDCategoria FROM `logpartite` AS LP INNER JOIN `elementi` AS E ON LP.FKElemento=E.IDElemento INNER JOIN `categorie` AS C ON E.FKCategoria=C.IDCategoria WHERE `FKUtente`=?", [req.session.IDUser], (err, result) => {
@@ -507,7 +513,7 @@ app.get('/', (req, res) => {
             DisconnectDB(conn)
         } else {
             var conn = ConnectDB()
-            conn.query("SELECT P.`IDPartita`, P.`FKCategoria`, C.Alias, (SELECT COUNT(*) FROM `logpartite` WHERE FKPartita=IDPartita) AS Giocatori FROM `partite` AS P INNER JOIN `categorie` AS C ON P.FKCategoria=C.IDCategoria WHERE `FKGruppo`=?", [req.session.IDUser], (err, result) => {
+            conn.query("SELECT P.`IDPartita`, P.`FKCategoria`, C.`Alias`, P.`DataCreazione`, (SELECT COUNT(*) FROM `logpartite` WHERE FKPartita=IDPartita) AS Giocatori FROM `partite` AS P INNER JOIN `categorie` AS C ON P.FKCategoria=C.IDCategoria WHERE `FKGruppo`=?", [req.session.IDUser], (err, result) => {
                 if (err) {
                     res.render("login", {
                         title: "Login",
@@ -517,7 +523,7 @@ app.get('/', (req, res) => {
                 }
                 res.render("partite", {
                     title: "Dashboard delle partite di " + req.session.username,
-                    head: ["ID Partita", "Categoria", " Numero di giocatori"],
+                    head: ["ID Partita", "Categoria", "Data e Ora d'avvio", " Numero di giocatori"],
                     body: result,
                     url: 'home'
                 });
@@ -556,7 +562,7 @@ app.get('/categorie', (req, res) => {
 app.get('/partita/:tagId', (req, res) => {
     if (req.session.loggedIn) {
         var conn = ConnectDB()
-        conn.query("SELECT U.Username AS FKPartita, LP.`Classificato`, E.`Valore`, E.`Link`, C.Alias, C.IDCategoria FROM `logpartite` AS LP INNER JOIN `elementi` AS E ON LP.FKElemento=E.IDElemento INNER JOIN `categorie` AS C ON E.FKCategoria=C.IDCategoria INNER JOIN utenti AS U ON LP.FKUtente=U.IDUtente WHERE `FKPartita`=?", [req.params.tagId], (err, result) => {
+        conn.query("SELECT U.Username AS FKPartita, LP.`Classificato`, E.`Valore`, E.`Link`, C.Alias, C.IDCategoria FROM `logpartite` AS LP INNER JOIN `elementi` AS E ON LP.FKElemento=E.IDElemento INNER JOIN `categorie` AS C ON E.FKCategoria=C.IDCategoria INNER JOIN `utenti` AS U ON LP.FKUtente=U.IDUtente WHERE `FKPartita`=?", [req.params.tagId], (err, result) => {
             if (err) {
                 res.render("login", {
                     title: "Login",
@@ -579,19 +585,35 @@ app.get('/partita/:tagId', (req, res) => {
 
 app.get('/elementi/:tagId', (req, res) => {
     if (req.session.loggedIn) {
-        var conn = ConnectDB()
-        conn.query("SELECT `IDElemento`, `Valore`, `Link`,(SELECT COUNT(`FKElemento`) FROM `logpartite` WHERE `FKElemento`=`IDElemento` GROUP BY `FKElemento`) AS Utilizzato FROM `elementi` WHERE `FKCategoria`=?", [req.params.tagId], (err, result) => {
-            if (err) {
-                res.redirect("/")
-            }
-            res.render("elementi", {
-                title: "Tutti gli elementi",
-                head: ["ID Elemento", "Immagine", "Descrizione", "Utilizzato"],
-                body: result,
-                url: 'categorie'
+        if (req.params.tagId == 1) {
+            var conn = ConnectDB()
+            conn.query("SELECT `IDElemento`, `Valore`, `Link`,(SELECT COUNT(`FKElemento`) FROM `logpartite` WHERE `FKElemento`=`IDElemento` GROUP BY `FKElemento`) AS Utilizzato FROM `elementi`", (err, result) => {
+                if (err) {
+                    res.redirect("/")
+                }
+                res.render("elementi", {
+                    title: "Tutti gli elementi",
+                    head: ["ID Elemento", "Immagine", "Descrizione", "Utilizzato"],
+                    body: result,
+                    url: 'categorie'
+                });
+                DisconnectDB(conn)
             });
-            DisconnectDB(conn)
-        });
+        } else {
+            var conn = ConnectDB()
+            conn.query("SELECT `IDElemento`, `Valore`, `Link`,(SELECT COUNT(`FKElemento`) FROM `logpartite` WHERE `FKElemento`=`IDElemento` GROUP BY `FKElemento`) AS Utilizzato FROM `elementi` WHERE `FKCategoria`=?", [req.params.tagId], (err, result) => {
+                if (err) {
+                    res.redirect("/")
+                }
+                res.render("elementi", {
+                    title: "Tutti gli elementi",
+                    head: ["ID Elemento", "Immagine", "Descrizione", "Utilizzato"],
+                    body: result,
+                    url: 'categorie'
+                });
+                DisconnectDB(conn)
+            });
+        }
     } else {
         res.redirect("/")
     }
@@ -600,7 +622,7 @@ app.get('/elementi/:tagId', (req, res) => {
 app.post('/', (req, res, next) => {
     var conn = ConnectDB()
     conn.query("SELECT `IDUtente`,`Password`, `Ruolo` FROM `utenti` WHERE `Username`=?", req.body.username, function(error, result) {
-        if (error) {
+        if (error || result.length == 0) {
             res.render("login", {
                 title: "Login",
                 message: "Dati errati.",
@@ -635,4 +657,4 @@ app.get('/logout', (req, res) => {
     res.redirect("/")
 })
 
-app.listen(configurazione.port, configurazione.hostname, () => console.log("Connesso a " + configurazione.hostname + ":" + configurazione.port));
+app.listen(process.env.PORT, () => console.log("Connesso online"));

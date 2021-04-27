@@ -1,26 +1,36 @@
 {
     "name": "chisono-telegrambot",
     "version": "1.0.0",
-    "description": "La versione per telegram del famoso gioco Chi Sono",
+    "description": "Il famoso gioco Chi Sono sbarca su Telegram",
     "main": "app.js",
     "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "start": "npm start"
     },
     "repository": {
         "type": "git",
-        "url": "https://github.com/migelmalajISII/ChiSono-TelegramBot"
+        "url": "git+https://github.com/migelmalajISII/ChiSono-TelegramBot.git"
     },
     "author": "Migel Malaj",
     "license": "MIT",
+    "bugs": {
+        "url": "https://github.com/migelmalajISII/ChiSono-TelegramBot/issues"
+    },
+    "homepage": "https://github.com/migelmalajISII/ChiSono-TelegramBot#readme",
     "dependencies": {
         "bcrypt": "^5.0.1",
+        "dotenv": "^8.2.0",
         "ejs": "^3.1.6",
         "express": "^4.17.1",
         "express-session": "^1.17.1",
         "generate-password": "^1.6.0",
         "mysql": "^2.18.1",
-        "node-telegram-bot-api": "^0.52.0",
+        "node-telegram-bot-api": "^0.52.0"
+    },
+    "devDependencies": {
         "nodemon": "^2.0.7"
     },
-    "devDependencies": {}
+    "engines": {
+        "node": "14.x"
+    }
 }
