@@ -28,7 +28,8 @@ function ConnectDB() {
         database: configurazione.DB_DATABASE,
         user: configurazione.DB_USER,
         password: configurazione.DB_PASSWORD,
-        multipleStatements: true
+        multipleStatements: true,
+        dateStrings: true
     }
     var connection = mysql.createConnection(config);
     connection.connect(function(err) {
@@ -486,7 +487,6 @@ app.set("view engine", "ejs");
 
 app.get('/', (req, res) => {
     if (req.session.loggedIn) {
-        console.log(req.session.type.data)
         if (req.session.type.data == 0) {
             var conn = ConnectDB()
             conn.query("SELECT LP.`FKPartita`, LP.`Classificato`, E.`Valore`, E.`Link`, C.Alias, C.IDCategoria FROM `logpartite` AS LP INNER JOIN `elementi` AS E ON LP.FKElemento=E.IDElemento INNER JOIN `categorie` AS C ON E.FKCategoria=C.IDCategoria WHERE `FKUtente`=?", [req.session.IDUser], (err, result) => {
@@ -507,7 +507,7 @@ app.get('/', (req, res) => {
             DisconnectDB(conn)
         } else {
             var conn = ConnectDB()
-            conn.query("SELECT P.`IDPartita`, P.`FKCategoria`, C.Alias, (SELECT COUNT(*) FROM `logpartite` WHERE FKPartita=IDPartita) AS Giocatori FROM `partite` AS P INNER JOIN `categorie` AS C ON P.FKCategoria=C.IDCategoria WHERE `FKGruppo`=?", [req.session.IDUser], (err, result) => {
+            conn.query("SELECT P.`IDPartita`, P.`FKCategoria`, C.`Alias`, P.`DataCreazione`, (SELECT COUNT(*) FROM `logpartite` WHERE FKPartita=IDPartita) AS Giocatori FROM `partite` AS P INNER JOIN `categorie` AS C ON P.FKCategoria=C.IDCategoria WHERE `FKGruppo`=?", [req.session.IDUser], (err, result) => {
                 if (err) {
                     res.render("login", {
                         title: "Login",
@@ -517,7 +517,7 @@ app.get('/', (req, res) => {
                 }
                 res.render("partite", {
                     title: "Dashboard delle partite di " + req.session.username,
-                    head: ["ID Partita", "Categoria", " Numero di giocatori"],
+                    head: ["ID Partita", "Categoria", "Data e Ora d'avvio", " Numero di giocatori"],
                     body: result,
                     url: 'home'
                 });
@@ -579,19 +579,35 @@ app.get('/partita/:tagId', (req, res) => {
 
 app.get('/elementi/:tagId', (req, res) => {
     if (req.session.loggedIn) {
-        var conn = ConnectDB()
-        conn.query("SELECT `IDElemento`, `Valore`, `Link`,(SELECT COUNT(`FKElemento`) FROM `logpartite` WHERE `FKElemento`=`IDElemento` GROUP BY `FKElemento`) AS Utilizzato FROM `elementi` WHERE `FKCategoria`=?", [req.params.tagId], (err, result) => {
-            if (err) {
-                res.redirect("/")
-            }
-            res.render("elementi", {
-                title: "Tutti gli elementi",
-                head: ["ID Elemento", "Immagine", "Descrizione", "Utilizzato"],
-                body: result,
-                url: 'categorie'
+        if (req.params.tagId == 1) {
+            var conn = ConnectDB()
+            conn.query("SELECT `IDElemento`, `Valore`, `Link`,(SELECT COUNT(`FKElemento`) FROM `logpartite` WHERE `FKElemento`=`IDElemento` GROUP BY `FKElemento`) AS Utilizzato FROM `elementi`", (err, result) => {
+                if (err) {
+                    res.redirect("/")
+                }
+                res.render("elementi", {
+                    title: "Tutti gli elementi",
+                    head: ["ID Elemento", "Immagine", "Descrizione", "Utilizzato"],
+                    body: result,
+                    url: 'categorie'
+                });
+                DisconnectDB(conn)
             });
-            DisconnectDB(conn)
-        });
+        } else {
+            var conn = ConnectDB()
+            conn.query("SELECT `IDElemento`, `Valore`, `Link`,(SELECT COUNT(`FKElemento`) FROM `logpartite` WHERE `FKElemento`=`IDElemento` GROUP BY `FKElemento`) AS Utilizzato FROM `elementi` WHERE `FKCategoria`=?", [req.params.tagId], (err, result) => {
+                if (err) {
+                    res.redirect("/")
+                }
+                res.render("elementi", {
+                    title: "Tutti gli elementi",
+                    head: ["ID Elemento", "Immagine", "Descrizione", "Utilizzato"],
+                    body: result,
+                    url: 'categorie'
+                });
+                DisconnectDB(conn)
+            });
+        }
     } else {
         res.redirect("/")
     }
@@ -635,4 +651,4 @@ app.get('/logout', (req, res) => {
     res.redirect("/")
 })
 
-app.listen(configurazione.port, configurazione.hostname, () => console.log("Connesso a " + configurazione.hostname + ":" + configurazione.port));
+app.listen(process.env.PORT || configurazione.port, () => console.log("Connesso online"));
