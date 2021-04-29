@@ -15,6 +15,11 @@ const DB_USER = process.env.DB_USER || ""
 const DB_PASSWORD = process.env.DB_PASSWORD || ""
 const DB_DATABASE = process.env.DB_DATABASE || ""
 const PORT = process.env.PORT || 9090
+const GIOCATORI_MIN = process.env.GIOCATORI_MIN || 3
+const ERROR_MESSAGE = "😡 Ops, qualcosa è andato storto. Riprova più tardi, grazie.";
+const ATTESA_GIOCATORI = process.env.ATTESA_GIOCATORI || 30000
+const ATTESA_DOMANDE = process.env.ATTESA_DOMANDE || 60000
+const ATTESA_RISPOSTA = process.env.ATTESA_RISPOSTA || 20000
 
 const bot = new TelegramBot(TOKEN, {
     polling: true
@@ -65,16 +70,16 @@ function FillCategorie() {
         if (err)
             throw err;
         categorie = res;
-        DisconnectDB(conn)
     })
+    DisconnectDB(conn)
 
 }
 
-function RestartTimeOut(id) { // Stranamente Funziona Molto BUONO
+function RestartTimeOut(id) {
     if (countdownUser[id] != undefined) {
         clearTimeout(countdownUser[id])
     }
-    var callback = setTimeout(() => {
+    countdownUser[id] = setTimeout(() => {
         var conn = ConnectDB()
         conn.query("UPDATE `partite` SET Status=1 WHERE FKGruppo=? AND Status=0", id, (err, res) => {
             VerificaPartita(id).then((value) => {
@@ -86,11 +91,11 @@ function RestartTimeOut(id) { // Stranamente Funziona Molto BUONO
                 GeneraRuoli(id, value[1], value[0], value[2]);
             }).catch(() => {
                 conn.query("DELETE FROM partite WHERE FKGruppo=? AND Status=1 ORDER BY `IDPartita` DESC LIMIT 1", id);
-                bot.sendMessage("-" + id, "Partita non avviata");
+                bot.sendMessage("-" + id, "Immagino che i tuoi amici sono fuori a giocare quindi esci anche tu e non invocarmi se non ci sono abbastanza giocatori (partita non avviata 🤬)");
+                DisconnectDB(conn);
             });
         })
-    }, 15000);
-    countdownUser[id] = callback;
+    }, ATTESA_GIOCATORI);
 }
 
 function VerificaPartita(id) {
@@ -98,7 +103,7 @@ function VerificaPartita(id) {
         var conn = ConnectDB()
         conn.query("SELECT COUNT(LP.`FKUtente`) AS num, LP.`FKPartita`, P.`FKCategoria` FROM `logpartite` AS LP INNER JOIN `partite` AS P ON LP.`FKPartita`=P.`IDPartita` WHERE P.`Status`= 1 AND P.`FKGruppo`= ? GROUP BY LP.`FKPartita`", id, (err, res) => {
             try {
-                if (res[0].num < 3)
+                if (res[0].num < GIOCATORI_MIN)
                     reject();
                 else if (res[0].num < 20)
                     resolve([res[0].num, res[0].FKPartita, res[0].FKCategoria, false]); // 3<x<20
@@ -133,7 +138,7 @@ function GeneraRuoli(IDMessaggio, IDPartita, NumGiocatori, FKCategoria) {
                 var conn = ConnectDB()
                 conn.query("UPDATE `logpartite` SET `FKElemento`=? WHERE `FKUtente`=? AND `FKPartita`=?", [value[0][i].IDElemento, value[1][i].FKUtente, IDPartita], (err, res) => {
                     if (err) {
-                        bot.sendMessage(IDMessaggio, "Errore: Bot Inattivo.\nRiprovare più tardi");
+                        bot.sendMessage(IDMessaggio, ERROR_MESSAGE);
                         throw err;
                     }
                     if (i == NumGiocatori - 1)
@@ -147,7 +152,7 @@ function GeneraRuoli(IDMessaggio, IDPartita, NumGiocatori, FKCategoria) {
                 var conn = ConnectDB()
                 conn.query("UPDATE `logpartite` SET `FKElemento`=? WHERE `FKUtente`=? AND `FKPartita`=?", [value[0][elem].IDElemento, value[1][i].FKUtente, IDPartita], (err, res) => {
                     if (err) {
-                        bot.sendMessage(IDMessaggio, "Errore: Bot Inattivo.\nRiprovare più tardi");
+                        bot.sendMessage(IDMessaggio, ERROR_MESSAGE);
                         throw err;
                     }
                     if (i == NumGiocatori - 1)
@@ -157,16 +162,16 @@ function GeneraRuoli(IDMessaggio, IDPartita, NumGiocatori, FKCategoria) {
             }
         }
     }).catch(() => {
-        bot.sendMessage(IDMessaggio, "Errore: Bot Inattivo.\nRiprovare più tardi");
+        bot.sendMessage(IDMessaggio, ERROR_MESSAGE);
     })
 }
 
-async function MandaMessaggi(IDMessaggio, IDPartita, players) {
+function MandaMessaggi(IDMessaggio, IDPartita, players) {
     players.forEach(x => {
         var conn = ConnectDB()
         conn.query("SELECT E.`Valore`, LP.`FKUtente`, (SELECT `Username` FROM `utenti` WHERE `IDUtente`=LP.`FKUtente`) AS Username FROM `logpartite` AS LP INNER JOIN `elementi` AS E ON LP.`FKElemento`=E.`IDElemento` WHERE `FKUtente` <> ? AND `FKPartita`=?", [x.FKUtente, IDPartita], (err, res) => {
             if (err) {
-                bot.sendMessage(x.FKUtente, "Errore: Bot Inattivo.\nRiprovare più tardi");
+                bot.sendMessage(x.FKUtente, ERROR_MESSAGE);
                 throw err;
             }
             res.forEach(y => {
@@ -180,7 +185,7 @@ async function MandaMessaggi(IDMessaggio, IDPartita, players) {
     GestisciPartiteInCorso(IDMessaggio, IDPartita, players)
 }
 
-async function GestisciPartiteInCorso(IDMessaggio, IDPartita, player) {
+function GestisciPartiteInCorso(IDMessaggio, IDPartita, player) {
     if (partiteInCorso[IDMessaggio] != undefined) {
         clearTimeout(partiteInCorso[IDMessaggio].callback);
     } else {
@@ -200,24 +205,24 @@ async function GestisciPartiteInCorso(IDMessaggio, IDPartita, player) {
     }
 
     if (partiteInCorso[IDMessaggio].fase == 0) {
-        bot.sendMessage("-" + IDMessaggio, "Tocca a [" + partiteInCorso[IDMessaggio].players[partiteInCorso[IDMessaggio].turno].Username + "](tg://user?id=" + partiteInCorso[IDMessaggio].players[partiteInCorso[IDMessaggio].turno].FKUtente + ").\nHai 45 secondi per fare tutte le domande.", {
+        bot.sendMessage("-" + IDMessaggio, "[" + partiteInCorso[IDMessaggio].players[partiteInCorso[IDMessaggio].turno].Username + "](tg://user?id=" + partiteInCorso[IDMessaggio].players[partiteInCorso[IDMessaggio].turno].FKUtente + ") è il tuo momento per fare le domande, hai esattamente 1 minuto da ora ⏳", {
             parse_mode: 'Markdown'
         });
-        partiteInCorso[IDMessaggio].time = 45000
+        partiteInCorso[IDMessaggio].time = ATTESA_DOMANDE
     } else {
-        partiteInCorso[IDMessaggio].time = 10000
+        partiteInCorso[IDMessaggio].time = ATTESA_RISPOSTA
     }
 
     partiteInCorso[IDMessaggio].callback = setTimeout(() => {
         if (partiteInCorso[IDMessaggio].fase == 0) {
-            bot.sendMessage("-" + IDMessaggio, "Il tempo delle domande è finito, [" + partiteInCorso[IDMessaggio].players[partiteInCorso[IDMessaggio].turno].Username + "](tg://user?id=" + partiteInCorso[IDMessaggio].players[partiteInCorso[IDMessaggio].turno].FKUtente + ") scrivi la tua risposta.\n(*Unico Formato Accettato*: [\/result](tg://result) _risposta_)", {
+            bot.sendMessage("-" + IDMessaggio, "[" + partiteInCorso[IDMessaggio].players[partiteInCorso[IDMessaggio].turno].Username + "](tg://user?id=" + partiteInCorso[IDMessaggio].players[partiteInCorso[IDMessaggio].turno].FKUtente + ") il tempo delle domande è scaduto, ora hai 20 secondi per pensare a chi puoi essere e scrivere la tua risposta.\n(*Unico Formato Accettato*: [\/result](tg://result) _risposta_)", {
                 parse_mode: 'Markdown'
             });
             partiteInCorso[IDMessaggio].fase++;
             GestisciPartiteInCorso(IDMessaggio, undefined, undefined)
         } else {
-            var conn = ConnectDB()
             try {
+                var conn = ConnectDB()
                 conn.query("SELECT E.`Valore`,E.`Link` FROM `logpartite` AS LP INNER JOIN `elementi` AS E ON LP.`FKElemento`=E.`IDElemento` WHERE `FKUtente`= ? AND`FKPartita`=?", [partiteInCorso[IDMessaggio].players[partiteInCorso[IDMessaggio].turno].FKUtente, partiteInCorso[IDMessaggio].idpartita], (err, res) => {
                     if (err)
                         throw err;
@@ -228,7 +233,7 @@ async function GestisciPartiteInCorso(IDMessaggio, IDPartita, player) {
                         if (res[0].Valore.toUpperCase() == partiteInCorso[IDMessaggio].result.toUpperCase()) {
                             let FKUtente = partiteInCorso[IDMessaggio].players[partiteInCorso[IDMessaggio].turno].FKUtente
                             partiteInCorso[IDMessaggio].players.splice(partiteInCorso[IDMessaggio].turno, 1);
-                            conn.query("UPDATE `logpartite` SET `Classificato`=(SELECT MAX(tab.`Classificato`)+1 FROM (SELECT * FROM `logpartite`) AS tab WHERE tab.`FKPartita`=`FKPartita`) WHERE `FKUtente`= ? AND `FKPartita`= ?", [FKUtente, partiteInCorso[IDMessaggio].idpartita], (errs, ress) => {
+                            conn.query("UPDATE `logpartite` AS L SET L.`Classificato`=(SELECT MAX(tab.`Classificato`)+1 FROM (SELECT * FROM `logpartite`) AS tab WHERE tab.`FKPartita`=L.`FKPartita`) WHERE L.`FKUtente`= ? AND L.`FKPartita`= ?", [FKUtente, partiteInCorso[IDMessaggio].idpartita], (errs, ress) => {
                                 if (errs)
                                     throw errs;
                                 bot.sendPhoto("-" + IDMessaggio, res[0].Link, {
@@ -247,13 +252,14 @@ async function GestisciPartiteInCorso(IDMessaggio, IDPartita, player) {
                         partiteInCorso[IDMessaggio].turno = 0;
                     }
                     if (partiteInCorso[IDMessaggio].players.length > 1) {
+                        DisconnectDB(conn)
                         GestisciPartiteInCorso(IDMessaggio, undefined, undefined)
                     } else {
                         clearTimeout(partiteInCorso[IDMessaggio])
-                        conn.query("UPDATE `logpartite` SET `Classificato`=(SELECT MAX(tab.`Classificato`)+1 FROM (SELECT * FROM `logpartite`) AS tab WHERE tab.`FKPartita`=`FKPartita`) WHERE `FKUtente`= ? AND `FKPartita`= ?; UPDATE `partite` SET Status=2 WHERE FKGruppo=? AND Status=1", [partiteInCorso[IDMessaggio].players[partiteInCorso[IDMessaggio].turno].FKUtente, partiteInCorso[IDMessaggio].idpartita, IDMessaggio], (err, res) => {
+                        conn.query("UPDATE `logpartite` AS L SET L.`Classificato`=(SELECT MAX(tab.`Classificato`)+1 FROM (SELECT * FROM `logpartite`) AS tab WHERE tab.`FKPartita`=L.`FKPartita`) WHERE L.`FKUtente`= ? AND L.`FKPartita`= ?; UPDATE `partite` SET Status=2 WHERE FKGruppo=? AND Status=1", [partiteInCorso[IDMessaggio].players[partiteInCorso[IDMessaggio].turno].FKUtente, partiteInCorso[IDMessaggio].idpartita, IDMessaggio], (err, res) => {
                             if (err) {
                                 if (err.code != 'ER_DUP_ENTRY') {
-                                    bot.sendMessage("-" + IDMessaggio, "Errore: Bot Inattivo.\nRiprovare più tardi");
+                                    bot.sendMessage("-" + IDMessaggio, ERROR_MESSAGE);
                                     throw err
                                 }
                             }
@@ -272,10 +278,10 @@ async function GestisciPartiteInCorso(IDMessaggio, IDPartita, player) {
 bot.onText(/\/start/, (msg) => {
     if (msg.chat.type == 'group') {
         var conn = ConnectDB()
-        conn.query("INSERT INTO `utenti`(Ruolo,IDUtente) VALUES (?,1,?)", [msg.chat.title, Math.abs(msg.chat.id)], (err, result) => {
+        conn.query("INSERT INTO `utenti`(Username,Ruolo,IDUtente) VALUES (?,1,?)", [msg.chat.title, Math.abs(msg.chat.id)], (err, result) => {
             if (err) {
                 if (err.code != 'ER_DUP_ENTRY') {
-                    bot.sendMessage(msg.chat.id, "Errore: Bot Inattivo.\nRiprovare più tardi");
+                    bot.sendMessage(msg.chat.id, ERROR_MESSAGE);
                     throw err
                 }
             }
@@ -289,7 +295,7 @@ bot.onText(/\/start/, (msg) => {
         conn.query("INSERT INTO `utenti`(Username, Ruolo, IDUtente) VALUES (?,0,?)", [msg.chat.first_name, Math.abs(msg.chat.id)], (err, result) => {
             if (err) {
                 if (err.code != 'ER_DUP_ENTRY') {
-                    bot.sendMessage(msg.chat.id, "Errore: Bot Inattivo.\nRiprovare più tardi");
+                    bot.sendMessage(msg.chat.id, ERROR_MESSAGE);
                     throw err
                 }
             }
@@ -335,7 +341,7 @@ bot.onText(/\/partecipo/, (msg) => {
                             bot.sendMessage(msg.chat.id, "[" + msg.from.first_name + "](tg://user?id=" + msg.from.id + ") partecipi già alla partita", {
                                 parse_mode: 'Markdown'
                             });
-                        } else if (errs.code == 'ER_NO_REFERENCED_ROW_2')
+                        } else if (errs.code == 'ER_NO_REFERENCED_ROW_2' || errs.code == 'ER_NO_REFERENCED_ROW')
                             bot.sendMessage(msg.chat.id, "[" + msg.from.first_name + "](tg://user?id=" + msg.from.id + ") avvia il bot in privato premendo [\/start](t.me/NM_ChiSono_Bot)", {
                                 parse_mode: 'Markdown'
                             });
@@ -343,7 +349,7 @@ bot.onText(/\/partecipo/, (msg) => {
                             throw errs;
                     } else {
                         RestartTimeOut(Math.abs(msg.chat.id))
-                        bot.sendMessage(msg.chat.id, "[" + msg.from.first_name + "](tg://user?id=" + msg.from.id + ") Si è unito alla partita", {
+                        bot.sendMessage(msg.chat.id, "[" + msg.from.first_name + "](tg://user?id=" + msg.from.id + ") si è unito per giocare a una tranquilla partita (forse😏)", {
                             parse_mode: 'Markdown'
                         });
 
@@ -372,14 +378,14 @@ bot.on("callback_query", function(callbackQuery) {
     var conn = ConnectDB()
     conn.query("INSERT INTO `partite`(FKCategoria,FKGruppo) VALUES (?,?)", [parseInt(number), Math.abs(parseInt(callbackQuery.message.chat.id))], (err, results) => {
         if (err) {
-            bot.editMessageText("Errore: Bot Inattivo.\nRiprovare più tardi", {
+            bot.editMessageText(ERROR_MESSAGE, {
                 chat_id: callbackQuery.message.chat.id,
                 message_id: callbackQuery.message.message_id
             });
             console.error("Errore nel database: ")
             throw err;
         }
-        bot.editMessageText("Partita avviata con successo.\nCategoria scelta: *" + categoria + "*.\nPer partecipare digitare \/partecipo", {
+        bot.editMessageText("Partita avviata con successo.\nCategoria scelta: *" + categoria + "*.\nIn attesa di giocatori: per partecipare digitare \/partecipo", {
             parse_mode: 'Markdown',
             chat_id: callbackQuery.message.chat.id,
             message_id: callbackQuery.message.message_id
@@ -395,7 +401,7 @@ bot.onText(/\/termina/, (msg) => {
         conn.query("UPDATE `partite` SET Status=2 WHERE FKGruppo=? AND (Status=1 OR Status=0)", Math.abs(msg.chat.id), (err, res) => {
             if (err) {
                 if (err.code != 'ER_DUP_ENTRY') {
-                    bot.sendMessage(msg.chat.id, "Errore: Bot Inattivo.\nRiprovare più tardi");
+                    bot.sendMessage(msg.chat.id, ERROR_MESSAGE);
                     throw err
                 }
             }
@@ -408,7 +414,7 @@ bot.onText(/\/termina/, (msg) => {
                 countdownUser[Math.abs(msg.chat.id)] = undefined
             }
             DisconnectDB(conn)
-            bot.sendMessage(msg.chat.id, "Partita annullata");
+            bot.sendMessage(msg.chat.id, "Partita terminata");
         })
     } else {
         bot.sendMessage(msg.chat.id, "Comando disponibile solo per i gruppi");
@@ -449,11 +455,10 @@ bot.onText(/\/generapassword/, (msg) => {
             console.log(error);
             bot.sendMessage(msg.chat.id, "Riprova più tardi");
         }
-        bot.sendMessage(msg.chat.id, "Inviata");
+        bot.sendMessage(msg.chat.id, "Password inviata nella chat privata");
         bot.sendMessage(msg.from.id, "Password generata con successo.\nUsername: " + from + "\nPassword: " + password);
     });
     DisconnectDB(conn)
-
 });
 
 bot.onText(/\/setpassword (.+)/, (msg, match) => {
@@ -564,17 +569,13 @@ app.get('/partita/:tagId', (req, res) => {
         var conn = ConnectDB()
         conn.query("SELECT U.Username AS FKPartita, LP.`Classificato`, E.`Valore`, E.`Link`, C.Alias, C.IDCategoria FROM `logpartite` AS LP INNER JOIN `elementi` AS E ON LP.FKElemento=E.IDElemento INNER JOIN `categorie` AS C ON E.FKCategoria=C.IDCategoria INNER JOIN `utenti` AS U ON LP.FKUtente=U.IDUtente WHERE `FKPartita`=?", [req.params.tagId], (err, result) => {
             if (err) {
-                res.render("login", {
-                    title: "Login",
-                    message: false,
-                    type: false
-                });
+                res.redirect("/")
             }
             res.render("dashboard", {
                 title: "Dashboard delle partite di " + req.session.username,
                 head: ["Nome Giocatore", "Immagine", "Elemento", " Categoria", "Classificato"],
                 body: result,
-                url: 'categorie'
+                url: 'home'
             });
         });
         DisconnectDB(conn)
@@ -635,12 +636,13 @@ app.post('/', (req, res, next) => {
                 res.locals.username = req.body.username
                 res.locals.type = result[0].Ruolo
                 next()
-            } else
+            } else {
                 res.render("login", {
                     title: "Login",
                     message: "Dati errati.",
                     type: "alert-danger"
                 });
+            }
         }
     });
     DisconnectDB(conn)
@@ -657,4 +659,4 @@ app.get('/logout', (req, res) => {
     res.redirect("/")
 })
 
-app.listen(PORT, () => console.log("Connesso online"));
+app.listen(PORT, () => console.log("Connesso alla porta " + PORT));
